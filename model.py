@@ -367,6 +367,7 @@ class LS_Base(object):
                 target_all.append(value[1]*w)
         feature_all = np.concatenate(feature_all, axis=0)
         target_all = np.concatenate(target_all, axis=0)
+
         #feature_all = torch.tensor(feature_all, dtype=torch.float64).to('cuda')
         #target_all = torch.tensor(target_all, dtype=torch.float64).to('cuda')
         #coef, _, r, _ = torch.linalg.lstsq(feature_all, target_all)
@@ -469,9 +470,6 @@ class TrainLS(LS_Base):
         #     self.basis_x_ic = self.basis.eval_basis(self.problem.x_ic, eval_list=['u'])
 
     def ls_pde_picard(self, x_pde, x_bd, x_ic, u_old, target_constrain, max_iter=20, weights=None, verbose=False):
-        '''
-        Nonlinear PDEs solution
-        '''
         # picard
         #current_ceof = None
         info = {}
@@ -485,9 +483,9 @@ class TrainLS(LS_Base):
 
             current_ceof = coef_sol
             u_new = np.matmul(basis_x_pde['u'], current_ceof['u'])
-            residual = np.max(np.abs(u_new - u_old))
+            residual = np.max(np.abs(u_new - u_old)) # error between u^{s+1} and u^s
             u_old = u_new
-            ls_mse = info1['ls_mse']
+            ls_mse = info1['ls_mse'] # error between u^{s+1} and exact solution
             train_u.append(u_new)
             train_ls_mse.append(ls_mse)
             train_residual.append(residual)
@@ -505,6 +503,7 @@ class TrainLS(LS_Base):
         return current_ceof, info
 
     def ls_pde(self, x_pde, x_bd, x_ic, u_old, target_constrain, timestep_initial=True, current_ceof=None, weights=None, ls_mse=True, item_mse=False, basis_x_pde=None):
+        # generate coefficient matrix
         if timestep_initial:
             if current_ceof is None:
                 feature_all = self.get_feature_initial(x_pde, x_bd, x_ic, u_old, current_sol=None)
@@ -526,6 +525,7 @@ class TrainLS(LS_Base):
                     current_sol[var] = np.matmul(basis_x_pde['u'], current_ceof[var])
                 feature_all = self.get_feature_others(x_pde, x_bd, u_old, current_sol=current_sol)
 
+        # calculate alpha
         coef, info = self.ls_fit(feature_all, target_constrain, weights=weights, ls_mse=ls_mse, item_mse=item_mse)
         out_var = self.problem.out_var
         basis_num = int(coef.shape[0]/len(out_var))
@@ -538,6 +538,7 @@ class TrainLS(LS_Base):
         return coef_sol, info
 
     def get_feature_initial(self, x_pde, x_bd, x_ic, u_old, current_sol=None):
+        # coefficient matrix on time layer t_0
         feature_ini = {}
         # pde features
         pde_feature = self.problem.ls_feature_pde(x_pde, u_old, basis=self.basis, constrain=False, current_sol=current_sol)
@@ -554,6 +555,7 @@ class TrainLS(LS_Base):
         return feature_ini
     
     def get_feature_others(self, x_pde, x_bd, u_old, current_sol=None):
+        # coefficient matrix on time layer t_i (i!=0)
         feature_all = {}
         # pde features
         pde_feature = self.problem.ls_feature_pde(x_pde, u_old, basis=self.basis, constrain=True, current_sol=current_sol)

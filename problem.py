@@ -45,6 +45,7 @@ class Domain(object):
         return text
 
     def sample_domain_uniform(self, mesh_size):
+        # generate uniform samples globally
         domain_dim = self.domain_dim
 
         if type(mesh_size) == int:
@@ -440,8 +441,6 @@ class Heat_2d_Case2(Problem):
 class Heat_Diffusion_1T(Problem):
     def __init__(self, case='z1b1g1Dl', data=None):
         super(Heat_Diffusion_1T, self).__init__(case, data)
-        # assert case in [1], f'case {case} not implemented'
-        # var= [y, x1, x2]
         self.pde_name = 'Heat_diffusion_1T'
         self.eval_list_pde = ['u', 'u0', 'u1', 'u2', 'u11', 'u22']
         self.eq_names = ['pde']
@@ -450,22 +449,24 @@ class Heat_Diffusion_1T(Problem):
         self.z = 1
 
     def diff(self, u_old):
+        # diffusion coefficient
         z = self.z
         u_min = 1e-6 * np.ones_like(u_old)
         u_old = np.maximum(u_old, u_min)
         if self.case[7] == 'u': ## Case Dul
-            D_1 = u_old**(-1/4) / (4*z**3)
-            D_2 = u_old**(3/4) / (3*z**3)
+            D_1 = u_old**(-1/4) / (4*z**3) # 这个不用管
+            D_2 = u_old**(3/4) / (3*z**3) # 这个才是D_ul
         return D_1, D_2
 
     def rhs(self, x_in):
+        # source term
         x = x_in[:, [1]]
         return np.zeros_like(x)
 
     def lhs(self, u_old, u_t, u_x, u_y, u_xx, u_yy):
-        # diffusion coefficient: D
+        # the left side of the equation
         D_1, D_2 = self.diff(u_old)
-        return u_t - D_1 * (u_x**2 + u_y**2) - D_2 * (u_xx + u_yy)
+        return u_t - D_2 * (u_xx + u_yy)
         #return u_t - (u**(-1/4)/(4*z**3)) * (u_x**2 + u_y**2) - (u**(3/4)/(3*z**3)) * (u_xx + u_yy)
     
     def initial(self, x_in):
@@ -495,24 +496,27 @@ class Heat_Diffusion_1T(Problem):
             return u_bd
 
     def boudary_others(self, x_in):
+        # boundary condition on x=1, y=0 and y=1
         x = x_in[:, [1]]
         return np.zeros_like(x)
 
     def ls_feature_pde(self, x_in, u_old, basis, constrain=True, current_sol=None):
-        #assert feature_name in self.eq_names, 'Invalid pde feature name.'
+        # generate u_t - D * (u_xx + u_yy) (=source)
         feature_pde_all = {}
         basis_eval = basis.eval_basis(x_in, eval_list=self.eval_list_pde)
         dt = 1 / 1000
-        
         if current_sol is None:
             D_1, D_2 = self.diff(u_old)
         else:
             u_picard = current_sol['u']
             D_1, D_2 = self.diff(u_picard)
+
         #feature_pde = basis_eval['u0'] - D_1 * (basis_eval['u1']**2 + basis_eval['u2']**2) - D_2 * (basis_eval['u11'] + basis_eval['u22'])
         feature_pde = basis_eval['u0'] - D_2 * (basis_eval['u11'] + basis_eval['u22'])
         target_pde = self.rhs(x_in)
         feature_pde_all['pde'] = [feature_pde, target_pde]
+
+        # backward differential: u^n - D^n * (u_xx^n + u_yy^n) (=source+u^{n-1}=u^{n-1})
         if constrain:
             #feature_constrain = basis_eval['u'] - dt * D_1 * (basis_eval['u1']**2 + basis_eval['u2']**2) - dt * D_2 * (basis_eval['u11'] + basis_eval['u22'])
             feature_constrain = basis_eval['u'] - dt * D_2 * (basis_eval['u11'] + basis_eval['u22'])
@@ -520,7 +524,7 @@ class Heat_Diffusion_1T(Problem):
         return feature_pde_all
     
     def ls_feature_boundary(self, x_in, u_old, basis, current_sol=None):
-        # assert value_name in self.out_var, 'Invalid value name.'
+        # generate 0.5 * u + D * (u_x, u_y) * n (=b)
         feature_bd_all = {}
         if current_sol is None:
             D_1, D_2 = self.diff(u_old)
@@ -556,7 +560,7 @@ class Heat_Diffusion_1T(Problem):
         return feature_bd_all
 
     def ls_feature_initial(self, x_in, basis):
-        # assert value_name in self.out_var, 'Invalid value name.'
+        # generate u (=g)
         feature_ic_all = {}
         # ic
         basis_eval = basis.eval_basis(x_in, eval_list=['u'])
