@@ -1,0 +1,105 @@
+// file: heat-1T-Nonlinear-(un)limited_diffusion.edp
+////////////////////方程参数////////////////////////////
+
+/************************电离度函数zeff(x)**************/
+//Case1: zeff function with two squares holes
+//func zeff = (x<7./16.)*(x>3./16.0)*(y<13./16.)*(y>9./16.0)*9.0+(x<13./16.)*(x>9./16.0)*(y<7./16.)*(y>3./16.0)*9.0+1.0;
+//Case2: zeff function being discontinuous acorss line x=0.5
+//func zeff = (x<1./2.)*10+(x>=1./2.)*1;
+//Case3: zeff function equal to 1.0
+func zeff = 1.0;
+
+/************************Robin边界条件beta函数**********/
+ 
+func real beta(real t, real t1, real BetaMax) //[0,t1]为线性增长到BetaMax(斜率为BetaMax/t1)，[t1,1]为BetaMax--最大加源值
+{
+  //Case 1: zero beta
+  return 0.0;
+  //Case 2: beta: [0,t1]为线性增长到BetaMax，[t1,1]为BetaMax常数源
+  //if(t<t1) 
+	//  return (BetaMax/t1)*t;
+  //else
+  //  return BetaMax;	  
+}
+
+/************************初值条件g函数******************/
+
+func real g(real r0, real Tmax) //r0为初始高斯半径，Tmax>0为高斯初始峰值
+{
+  //Case 1: const g=1e-3
+  //return 1.0e-3;
+  //Case 2: gaussian function
+  return 1.0e-3+Tmax*exp(-(x^2+y^2)/r0^2);	  
+}
+
+func source = 0.0;//right volume source，default being zero
+real Beta;//根据当前模拟时刻取beta函数值存为该实数
+//Terminal Time and time step
+real T=1.0, dt=1.0e-3;
+//Space domain configuration
+real x0 = 0, x1 = 1;
+real y0 = 0, y1 = 1;
+int Nx = 128, Ny = 128;
+//Mesh: Nx*Ny in 2D domain [x0,x1]x[y0,y1]
+mesh Th = square(Nx,Ny,[x0+(x1-x0)*x,y0+(y1-y0)*y]);
+//FEM space: P1 FEM 
+fespace Vh(Th,P1);
+//Some functions belonging to the P1 space
+//u: solution E
+//v: test function
+//kappa: unlimited DUL or limited DL 
+Vh u, uold, v, us,residual,kappa;
+//plot(Th,wait=false);//plot the mesh
+//Define the diffusion Problem
+int kk=0;
+problem Heat(u,v)
+		= int2d(Th)(u*v/dt+kappa*(dx(u)*dx(v)+dy(u)*dy(v)))
+ 		  +int1d(Th,1,2,3,4)(0.5*u*v)
+		  -int1d(Th,4)(Beta*v)//4：non-zero Robin only setting on the left-side; be zero on the other sides
+          -int2d(Th)(source*v)
+          -int2d(Th)(uold*v/dt); 
+
+//Begin Time marching
+u=g(0.1,100);//initialization u with initial function g 
+uold =u;
+us =u;
+int MAXITER = 100;//max number of nonlinear iterations
+real TOL = 1.0e-3;//nonlinear iteration TOL
+ofstream output("heat-1T-z3b1g2Dul.txt");
+for(int k=0;k<Th.nv;k++)
+{
+  output<<Th(k).x<<"  "<<Th(k).y<<"  "<<u[][k]<<endl;
+}
+for(real t=0;t<2*dt;t+=dt) 
+{
+  for(int iter=0;iter<MAXITER;iter++)
+  {
+    //kappa=(1.0/sqrt(zeff^6.0/us^1.5+(dx(us)^2+dy(us)^2)/us^2.0));//最早之前的算例
+    //kappa=1.0/(3.0*zeff^3.0/us^0.75+sqrt(dx(us)^2+dy(us)^2)/us);//单温限流扩散系数D_L
+    kappa=1.0/(3.0*zeff^3.0/us^0.75);//单温不限流扩散系数D_UL
+    //kappa=1.0;
+    Beta = beta(t+dt,0.5,10);//含时变化的边界条件函数beta
+    Heat;//solve this problem with P1 FEM
+    u = max(u,1.0e-6);//positivity truncation with the initial temperature
+    residual = u-us;//compute point-wise residuals
+    cout<<"current time: "<<t<<", Iter: "<<iter<<", Max residual: "<<residual[].linfty<<endl;
+    us = u;//nonlinear iteration update 
+    if(residual[].linfty<TOL) break;//break if |u{s}-u{s+1}|_{\linfty}<TOL
+  }
+	plot(u,wait=false,fill=1,value=1);//绘图 current solution
+  uold = u;//update solution after the nonlinear iterations
+  for(int k=0;k<Th.nv;k++)
+  {
+    output<<Th(k).x<<"  "<<Th(k).y<<"  "<<u[][k]<<endl;
+  }
+} 
+
+//output solution to txt files--can also being used in the loop for output solution at other times 
+//Now: only output the solution@terminal time  
+//for(int k=0;k<Th.nv;k++)
+//{
+//	output<<Th(k).x<<"  "<<Th(k).y<<"  "<<u[][k]<<endl;
+//}	
+//plot(u,wait=true,fill=1,value=1,ps="Nonlin-1T-diffusion-z1b1g2Dl.eps");
+
+
