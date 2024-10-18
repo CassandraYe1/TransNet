@@ -367,13 +367,13 @@ class LS_Base(object):
                 target_all.append(value[1]*w)
         feature_all = np.concatenate(feature_all, axis=0)
         target_all = np.concatenate(target_all, axis=0)
-        feature_all = torch.tensor(feature_all, dtype=torch.float64).to('cuda')
-        target_all = torch.tensor(target_all, dtype=torch.float64).to('cuda')
-        coef, _, r, _ = torch.linalg.lstsq(feature_all, target_all)
-        coef = coef.cpu().numpy()
-        feature_all = feature_all.cpu().numpy()
-        target_all = target_all.cpu().numpy()
-        #coef, _, r, _ = np.linalg.lstsq(feature_all, target_all, rcond=None)
+        #feature_all = torch.tensor(feature_all, dtype=torch.float64).to('cuda')
+        #target_all = torch.tensor(target_all, dtype=torch.float64).to('cuda')
+        #coef, _, r, _ = torch.linalg.lstsq(feature_all, target_all)
+        #coef = coef.cpu().numpy()
+        #feature_all = feature_all.cpu().numpy()
+        #target_all = target_all.cpu().numpy()
+        coef, _, r, _ = np.linalg.lstsq(feature_all, target_all, rcond=None)
 
         info = {}
         # get feature shape
@@ -473,37 +473,48 @@ class TrainLS(LS_Base):
         Nonlinear PDEs solution
         '''
         # picard
-        current_ceof = None
+        #current_ceof = None
         info = {}
+        train_u = []
         train_ls_mse = []
+        train_residual = []
         basis_x_pde = self.basis.eval_basis(x_pde, eval_list=['u'])
         for i in range(max_iter):
-            coef_sol, info1 = self.ls_pde(x_pde, x_bd, x_ic, u_old, target_constrain, timestep_initial=False, 
-                                          current_ceof=current_ceof, weights=weights, ls_mse=True, item_mse=False, basis_x_pde=basis_x_pde)
+            coef_sol, info1 = self.ls_pde(x_pde=x_pde, x_bd=x_bd, x_ic=x_ic, u_old=u_old, target_constrain=target_constrain, timestep_initial=False, 
+                                          current_ceof=None, weights=weights, ls_mse=True, item_mse=False, basis_x_pde=basis_x_pde)
 
             current_ceof = coef_sol
+            u_new = np.matmul(basis_x_pde['u'], current_ceof['u'])
+            residual = np.max(np.abs(u_new - u_old))
+            u_old = u_new
             ls_mse = info1['ls_mse']
+            train_u.append(u_new)
             train_ls_mse.append(ls_mse)
+            train_residual.append(residual)
 
             if verbose:
-                print(f'iter {i}\tls_mse={ls_mse}')
+                print(f'iter {i}\tls_mse={ls_mse}\tresidual={residual}')
+            if residual < 1e-3:
+                break
             # rmse_test, info2 = train_ls.get_rmse_test(coef_sol=coef_sol)
             # print('\nTest RMSE:', rmse_test)
             # test_rmse.append(rmse_test)
+        info['train_u'] = train_u
         info['train_ls_mse'] = train_ls_mse
+        info['train_residual'] = train_residual
         return current_ceof, info
 
     def ls_pde(self, x_pde, x_bd, x_ic, u_old, target_constrain, timestep_initial=True, current_ceof=None, weights=None, ls_mse=True, item_mse=False, basis_x_pde=None):
         if timestep_initial:
             if current_ceof is None:
-                feature_all = self.get_feature_initial(x_pde, x_bd, x_ic, current_sol=None)
+                feature_all = self.get_feature_initial(x_pde, x_bd, x_ic, u_old, current_sol=None)
             else:
                 if basis_x_pde is None:
-                    basis_x_pde = self.basis.eval_basis(self.problem.x_pde, eval_list=['u'])
+                    basis_x_pde = self.basis.eval_basis(x_pde, eval_list=['u'])
                 current_sol = {}
                 for var in self.problem.out_var:
                     current_sol[var] = np.matmul(basis_x_pde['u'], current_ceof[var])
-                feature_all = self.get_feature_initial(x_pde, x_bd, x_ic, current_sol=current_sol)
+                feature_all = self.get_feature_initial(x_pde, x_bd, x_ic, u_old, current_sol=current_sol)
         else:
             if current_ceof is None:
                 feature_all = self.get_feature_others(x_pde, x_bd, u_old, current_sol=None)
@@ -526,14 +537,14 @@ class TrainLS(LS_Base):
         info['feature_all'] = feature_all
         return coef_sol, info
 
-    def get_feature_initial(self, x_pde, x_bd, x_ic, current_sol=None):
+    def get_feature_initial(self, x_pde, x_bd, x_ic, u_old, current_sol=None):
         feature_ini = {}
         # pde features
-        pde_feature = self.problem.ls_feature_pde(x_pde, basis=self.basis, constrain=False, current_sol=current_sol)
+        pde_feature = self.problem.ls_feature_pde(x_pde, u_old, basis=self.basis, constrain=False, current_sol=current_sol)
         for key, value in pde_feature.items():
             feature_ini[key] = value
         # boundary features
-        bd_feature = self.problem.ls_feature_boundary(x_bd, basis=self.basis)
+        bd_feature = self.problem.ls_feature_boundary(x_bd, u_old, basis=self.basis, current_sol=current_sol)
         for key, value in bd_feature.items():
             feature_ini[key] = value
         # initial features

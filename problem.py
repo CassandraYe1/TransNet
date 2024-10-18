@@ -454,16 +454,18 @@ class Heat_Diffusion_1T(Problem):
         u_min = 1e-6 * np.ones_like(u_old)
         u_old = np.maximum(u_old, u_min)
         if self.case[7] == 'u': ## Case Dul
-            return u_old**(3/4) / (3*z**3)
+            D_1 = u_old**(-1/4) / (4*z**3)
+            D_2 = u_old**(3/4) / (3*z**3)
+        return D_1, D_2
 
     def rhs(self, x_in):
         x = x_in[:, [1]]
         return np.zeros_like(x)
 
-    def lhs(self, u_old, u_t, u_xx, u_yy):
+    def lhs(self, u_old, u_t, u_x, u_y, u_xx, u_yy):
         # diffusion coefficient: D
-        D = self.diff(u_old)
-        return u_t - D * (u_xx + u_yy)
+        D_1, D_2 = self.diff(u_old)
+        return u_t - D_1 * (u_x**2 + u_y**2) - D_2 * (u_xx + u_yy)
         #return u_t - (u**(-1/4)/(4*z**3)) * (u_x**2 + u_y**2) - (u**(3/4)/(3*z**3)) * (u_xx + u_yy)
     
     def initial(self, x_in):
@@ -498,21 +500,22 @@ class Heat_Diffusion_1T(Problem):
 
     def ls_feature_pde(self, x_in, u_old, basis, constrain=True, current_sol=None):
         #assert feature_name in self.eq_names, 'Invalid pde feature name.'
-        # Heat_example operator: u_t - D * (u_xx + u_yy)
         feature_pde_all = {}
         basis_eval = basis.eval_basis(x_in, eval_list=self.eval_list_pde)
         dt = 1 / 1000
         
         if current_sol is None:
-            D = self.diff(u_old)
+            D_1, D_2 = self.diff(u_old)
         else:
             u_picard = current_sol['u']
-            D = self.diff(u_picard)
-        feature_pde = basis_eval['u0'] - D * (basis_eval['u11'] + basis_eval['u22'])
+            D_1, D_2 = self.diff(u_picard)
+        #feature_pde = basis_eval['u0'] - D_1 * (basis_eval['u1']**2 + basis_eval['u2']**2) - D_2 * (basis_eval['u11'] + basis_eval['u22'])
+        feature_pde = basis_eval['u0'] - D_2 * (basis_eval['u11'] + basis_eval['u22'])
         target_pde = self.rhs(x_in)
         feature_pde_all['pde'] = [feature_pde, target_pde]
         if constrain:
-            feature_constrain = basis_eval['u'] - dt * D * (basis_eval['u11'] + basis_eval['u22'])
+            #feature_constrain = basis_eval['u'] - dt * D_1 * (basis_eval['u1']**2 + basis_eval['u2']**2) - dt * D_2 * (basis_eval['u11'] + basis_eval['u22'])
+            feature_constrain = basis_eval['u'] - dt * D_2 * (basis_eval['u11'] + basis_eval['u22'])
             feature_pde_all['constrain'] = [feature_constrain, target_pde]
         return feature_pde_all
     
@@ -520,33 +523,33 @@ class Heat_Diffusion_1T(Problem):
         # assert value_name in self.out_var, 'Invalid value name.'
         feature_bd_all = {}
         if current_sol is None:
-            D = self.diff(u_old)
+            D_1, D_2 = self.diff(u_old)
         else:
             u_picard = current_sol['u']
-            D = self.diff(u_picard)
+            D_1, D_2 = self.diff(u_picard)
         l = int(len(x_in) / 4)
         # bd where x = 1
         x_in_right = x_in[:l]
         basis_eval = basis.eval_basis(x_in_right, eval_list=['u', 'u1'])
-        feature_bd_right = 0.5 * basis_eval['u'] + D[-l:] * basis_eval['u1']
+        feature_bd_right = 0.5 * basis_eval['u'] + D_2[-l:] * basis_eval['u1']
         target_bd_right = self.boudary_others(x_in_right)
         feature_bd_all['bd_u_right'] = [feature_bd_right, target_bd_right]
         # bd where x = 0
         x_in_left = x_in[l:2*l]
         basis_eval = basis.eval_basis(x_in_left, eval_list=['u', 'u1'])
-        feature_bd_left = 0.5 * basis_eval['u'] - D[:l] * basis_eval['u1']
+        feature_bd_left = 0.5 * basis_eval['u'] - D_2[:l] * basis_eval['u1']
         target_bd_left = self.boudary_left(x_in_left)
         feature_bd_all['bd_u_left'] = [feature_bd_left, target_bd_left]
         # bd where y = 1
         x_in_top = x_in[2*l:3*l]
         basis_eval = basis.eval_basis(x_in_top, eval_list=['u', 'u2'])
-        feature_bd_top = 0.5 * basis_eval['u'] + D[(l-1)::l] * basis_eval['u2']
+        feature_bd_top = 0.5 * basis_eval['u'] + D_2[(l-1)::l] * basis_eval['u2']
         target_bd_top = self.boudary_others(x_in_top)
         feature_bd_all['bd_u_top'] = [feature_bd_top, target_bd_top]
         # bd where y = 0
         x_in_bottom = x_in[3*l:]
         basis_eval = basis.eval_basis(x_in_bottom, eval_list=['u', 'u2'])
-        feature_bd_bottom = 0.5 * basis_eval['u'] - D[::l] * basis_eval['u2']
+        feature_bd_bottom = 0.5 * basis_eval['u'] - D_2[::l] * basis_eval['u2']
         target_bd_bottom = self.boudary_others(x_in_bottom)
         feature_bd_all['bd_u_bottom'] = [feature_bd_bottom, target_bd_bottom]
         
